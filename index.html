@@ -155,8 +155,9 @@ onAuthStateChanged(auth, async (user) => {
       }
 
       // Generar contenido dinámico con Gemini
-      setTimeout(() => window.generarLibrosConGemini(data), 1500);
-      setTimeout(() => window.generarContenidoDinamico(data), 2000);
+      // Esperar un poco más para que la carta natal se calcule primero si es necesario
+      setTimeout(() => window.generarLibrosConGemini(data), 2000);
+      setTimeout(() => window.generarContenidoDinamico(data), 3000);
     }
 
     // Solo redirigir al dashboard si NO estamos en el paso 3 del registro
@@ -182,12 +183,11 @@ window.firebaseRegister = async function() {
   const ciudad = document.getElementById('r-city').value;
   _registrando = true; // Bloquear redirección automática
 
-  // Obtener hora del selector de ruedas
+  // Obtener hora del selector de ruedas — leer scrollTop real siempre
   const hEl = document.getElementById('hList');
   const mEl = document.getElementById('mList');
-  let hSelIdx = 12, mSelIdx = 0;
-  if (hEl && hEl.scrollTop > 0) hSelIdx = Math.min(23, Math.round(hEl.scrollTop / 40));
-  if (mEl && mEl.scrollTop > 0) mSelIdx = Math.min(59, Math.round(mEl.scrollTop / 40));
+  const hSelIdx = hEl ? Math.min(23, Math.round(hEl.scrollTop / 40)) : 12;
+  const mSelIdx = mEl ? Math.min(59, Math.round(mEl.scrollTop / 40)) : 0;
   const horaStr = `${String(hSelIdx).padStart(2,'0')}:${String(mSelIdx).padStart(2,'0')}`;
 
   // Obtener coordenadas guardadas al elegir ciudad
@@ -392,7 +392,21 @@ window.generarContenidoDinamico = async function(userData) {
   const luna = userData.lunaSigno || '?';
   const asc = userData.ascendente || '?';
   const ciudad = userData.ciudadNacimiento || '';
-  const prompt = `Sos un astrólogo experto. Generá contenido astrológico personalizado para ${nombre}, nacida en ${ciudad}. Carta natal: Sol en ${sol}, Luna en ${luna}, Ascendente en ${asc}. Fecha actual: ${new Date().toLocaleDateString('es-AR', {weekday:'long', day:'numeric', month:'long', year:'numeric'})}. Respondé SOLO con JSON válido, sin texto adicional ni backticks: {"cicloActivo":{"badge":"tránsito más importante ahora","titulo":"qué está siendo activado","cuerpo":"2-3 oraciones sobre el ciclo más relevante","porQue":"por qué afecta a esta carta natal específicamente","consejo":"consejo concreto para esta semana"},"transitos":[{"planeta":"nombre","glifo":"símbolo","posicion":"signo grados","casa":"casa afectada","desc":"energía que trae","cruce":"cómo interactúa con esta carta natal","duracion":"duración del tránsito","detalle":"análisis completo 3-4 oraciones"}],"proposito":{"label":"elementos clave de la carta","titulo":"propósito de vida","cuerpo":"2-3 oraciones","caminos":[{"emoji":"✍️","titulo":"camino 1","desc":"desc corta"},{"emoji":"🎓","titulo":"camino 2","desc":"desc corta"},{"emoji":"🔮","titulo":"camino 3","desc":"desc corta"},{"emoji":"🌱","titulo":"camino 4","desc":"desc corta"}]},"lunaPersonal":"cómo la luna de hoy afecta esta carta natal específicamente 2-3 oraciones"}. Incluí 4-5 tránsitos relevantes. Todo personalizado para Sol ${sol} Luna ${luna} Asc ${asc}.`;
+  // Enriquecer datos con lo que haya en currentUser
+  const cu = window.currentUser || {};
+  const fechaNac = cu.fechaNacimiento || userData.fechaNacimiento || '';
+  const edad = fechaNac ? (new Date().getFullYear() - new Date(fechaNac).getFullYear()) : '';
+  const prompt = `Sos un astrólogo experto en astrología occidental. Generá contenido astrológico detallado y personalizado para ${nombre}${edad ? ', '+edad+' años' : ''}, nacida/o en ${ciudad}${fechaNac ? ' el '+fechaNac : ''}.
+
+Carta natal conocida:
+- Sol en: ${sol}
+- Luna en: ${luna !== '?' ? luna : 'desconocida'}
+- Ascendente: ${asc !== '?' ? asc : 'desconocido'}
+- Fecha actual: ${new Date().toLocaleDateString('es-AR', {weekday:'long', day:'numeric', month:'long', year:'numeric'})}
+
+Respondé SOLO con JSON válido, sin texto adicional ni backticks, con este formato exacto:
+{"cicloActivo":{"badge":"nombre del tránsito más importante ahora mismo en abril 2026","titulo":"qué área de vida está siendo activada","cuerpo":"2-3 oraciones específicas para Sol en ${sol}","porQue":"por qué este tránsito afecta específicamente a alguien con Sol en ${sol}","consejo":"acción concreta y práctica para esta semana"},"transitos":[{"planeta":"nombre del planeta en tránsito","glifo":"símbolo astrológico del planeta","posicion":"signo y grado actual (abril 2026)","casa":"casa natal que activa en Sol ${sol}","desc":"qué energía o tema activa este tránsito","cruce":"cómo interactúa con Sol en ${sol}","duracion":"cuánto dura aproximadamente","detalle":"análisis completo y personalizado de 3-4 oraciones"}],"proposito":{"label":"Sol en ${sol}${asc !== '?' ? ' · Asc '+asc : ''}${luna !== '?' ? ' · Luna '+luna : ''}","titulo":"propósito de vida único para esta carta","cuerpo":"2-3 oraciones sobre el camino de vida con Sol en ${sol}","caminos":[{"emoji":"✍️","titulo":"primer camino de expresión","desc":"descripción específica para Sol en ${sol}"},{"emoji":"🎓","titulo":"segundo camino de aprendizaje","desc":"descripción específica"},{"emoji":"🔮","titulo":"tercer camino espiritual","desc":"descripción específica"},{"emoji":"🌱","titulo":"cuarto camino de crecimiento","desc":"descripción específica"}]},"lunaPersonal":"cómo la luna en Cuarto Creciente en Acuario de hoy afecta específicamente a alguien con Sol en ${sol}${luna !== '?' ? ' y Luna en '+luna : ''} — 2-3 oraciones concretas"}
+Incluí exactamente 5 tránsitos relevantes para abril 2026. Sé específico, no genérico.`;
   try {
     const res = await fetch('/.netlify/functions/gemini', {
       method: 'POST',
@@ -462,6 +476,7 @@ async function pkCall(endpoint, params) {
 }
 
 async function calcularCartaNatal(fecha, hora, lat, lng) {
+  // birth-details devuelve ascendente, luna, sol y datos básicos del nacimiento
   const datetime = `${fecha}T${hora || '12:00'}:00+00:00`;
   return pkCall('birth-details', {
     ayanamsa: 1,
@@ -517,15 +532,22 @@ window.cargarCartaNatal = async function(userData) {
   let ascendente = null, lunaSigno = null, solSigno = null;
 
   if (natal) {
-    ascendente = natal.ascendant ? (SIGNOS_ES[natal.ascendant.sign] || natal.ascendant.sign) : null;
+    // birth-details: natal.ascendant.sign.name o natal.ascendant.sign
+    const ascSign = natal.ascendant?.sign;
+    const ascRaw = (typeof ascSign === 'object') ? ascSign?.name : (ascSign || natal.ascendant?.rasi?.name || null);
+    ascendente = ascRaw ? (SIGNOS_ES[ascRaw] || ascRaw) : null;
+    // También leer Sol y Luna de birth-details si están disponibles
+    if (natal.sun_sign?.name && !solSigno) solSigno = SIGNOS_ES[natal.sun_sign.name] || natal.sun_sign.name;
+    if (natal.moon_sign?.name && !lunaSigno) lunaSigno = SIGNOS_ES[natal.moon_sign.name] || natal.moon_sign.name;
   }
 
   if (planetas && planetas.planet_position) {
     for (const p of planetas.planet_position) {
-      const nombre = p.name || p.planet;
-      const signo = SIGNOS_ES[p.sign] || p.sign;
-      if (nombre === 'Sun') solSigno = signo;
-      if (nombre === 'Moon') lunaSigno = signo;
+      const nombre = p.name || p.planet || p.planet_name || '';
+      const signRawPk = (typeof p.sign === 'object') ? (p.sign?.name || '') : (p.sign || '');
+      const signo = SIGNOS_ES[signRawPk] || signRawPk;
+      if (nombre === 'Sun' && !solSigno) solSigno = signo;
+      if (nombre === 'Moon' && !lunaSigno) lunaSigno = signo;
     }
   }
 
@@ -566,10 +588,16 @@ window.cargarCartaNatal = async function(userData) {
   if (planetas && planetas.planet_position && cartaWrap) {
     const CASAS_NOMBRES = ['','Casa 1','Casa 2','Casa 3','Casa 4','Casa 5','Casa 6','Casa 7','Casa 8','Casa 9','Casa 10','Casa 11','Casa 12'];
     const rows = planetas.planet_position.map(p => {
-      const nombre = PLANETAS_ES[p.name || p.planet] || p.name;
-      const signo = SIGNOS_ES[p.sign] || p.sign;
-      const grados = p.degree ? `${Math.floor(p.degree)}°${Math.floor((p.degree % 1) * 60)}'` : '';
-      const casa = p.house ? CASAS_NOMBRES[p.house] || `Casa ${p.house}` : '';
+      // Prokerala v2 structure: {name, longitude, sign: {id, name}, position: {degree, minutes}}
+      const nombre = PLANETAS_ES[p.name] || p.name || '';
+      const signRaw = (typeof p.sign === 'object') ? p.sign?.name : p.sign;
+      const signo = SIGNOS_ES[signRaw] || signRaw || '';
+      const lon = p.longitude || 0;
+      const deg = Math.floor(lon % 30);
+      const min = Math.floor((lon % 1) * 60);
+      const grados = `${deg}°${min}'`;
+      const houseNum = p.house?.id || p.house || 0;
+      const casa = houseNum ? (CASAS_NOMBRES[houseNum] || `Casa ${houseNum}`) : '';
       return `<div style="display:flex;justify-content:space-between;align-items:center;padding:10px 0;border-bottom:1px solid rgba(255,255,255,.05)">
         <span style="font-size:13px;color:var(--moon)">${nombre}</span>
         <span style="font-size:12px;color:var(--brandT)">${signo} ${grados}${casa ? ' · '+casa : ''}</span>
@@ -610,7 +638,8 @@ window.cargarCartaNatal = async function(userData) {
     };
     const counts = {Fuego:0,Tierra:0,Aire:0,Agua:0};
     planetas.planet_position.forEach(p => {
-      const elem = elemMap[p.sign];
+      const signRawE = (typeof p.sign === 'object') ? p.sign?.name : (p.sign || '');
+      const elem = elemMap[signRawE];
       if (elem) counts[elem]++;
     });
     const elemSection = document.getElementById('elementosSection');
